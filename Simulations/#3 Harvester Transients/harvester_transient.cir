@@ -1,0 +1,50 @@
+* ============================================================
+* Simulation 3: Energy Harvester Cold-Start & Storage Capacitor
+* Transient — Batteryless Backscatter Sensor Node (v2 - fixed
+* convergence failure by smoothing the overcharge clamp)
+* ============================================================
+
+.param PinW   = 100u      ; RF input to AEM30940, W (-10 dBm case; try 31.6u for -15 dBm)
+.param eta    = 0.5       ; boost converter efficiency
+.param Ctot   = 500u      ; 5 x 100uF MLCC bank
+.param ESR    = 5m        ; equivalent series resistance
+.param Rleak  = 50Meg     ; parallel leakage resistance
+.param Vchrdy = 3.67      ; AEM30940 charge-ready threshold
+.param Vovch  = 4.12      ; AEM30940 overcharge threshold (soft clamp)
+.param VBOR   = 1.8       ; MSP430 brownout threshold
+.param Isleep = 1.28u     ; ADXL362 wake-up (300n) + MSP430 LPM3 (0.98u)
+.param Iactive= 252.8u    ; MSP430 active (250u) + ADXL362 (1.8u) + ADG902 (1u)
+
+* --- Tx duty-cycle gate: 4s ON, 100ms OFF (period 4.1s) ---
+Vgate gate 0 PULSE(0 1 0 1u 1u 4 4.1)
+
+* --- Behavioral charging current source (constant-power: I = eta*Pin/V) ---
+* Overcharge cutoff is now a SMOOTH tanh-based soft switch instead of a
+* hard IF(), which was causing a convergence failure at the threshold
+* crossing (~t=97s). The steepness constant (50) gives a fast but
+* continuous rolloff around Vovch.
+Bcharge 0 cap I=V(gate)*eta*PinW/max(V(cap),0.05)*0.5*(1-tanh(50*(V(cap)-Vovch)))
+
+* --- Non-ideal capacitor bank: ideal C + ESR + parallel leakage ---
+Cstor  capint 0 {Ctot}
+Resr   cap capint {ESR}
+Rleak  cap 0 {Rleak}
+
+* --- Quiescent sleep load: ADXL362 wake-up mode + MSP430 LPM3 ---
+Isleep cap 0 {Isleep}
+
+* --- Event-driven active TX burst: 20ms pulse, repeating every 10s ---
+Iburst cap 0 PULSE(0 {Iactive} 5 1u 1u 20m 10)
+
+* --- Initial condition: dead cold start ---
+.ic V(cap)=0
+
+* --- Solver options to further aid convergence ---
+.options reltol=0.01
+.options gmin=1e-11
+
+* --- Transient analysis: 150s to capture full cold-start ramp + bursts ---
+.tran 0 150 0 1m uic
+
+.backanno
+.end
